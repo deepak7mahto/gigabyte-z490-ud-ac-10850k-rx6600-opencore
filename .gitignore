@@ -1,0 +1,11 @@
+# macOS metadata
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# Temp and backup files
+*.bak
+*.backup_*
+*before_ai
+oldConfig.plist
