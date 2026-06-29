@@ -1101,7 +1101,7 @@
 				AAAAAAAAAAAAAAAAAAA=
 				</data>
 				<key>boot-args</key>
-				<string>agdpmod=pikera</string>
+				<string>agdpmod=pikera darkwake=0</string>
 				<key>csr-active-config</key>
 				<data>
 				AwgAAA==
