@@ -9,3 +9,6 @@
 *.backup_*
 *before_ai
 oldConfig.plist
+
+# Compiled binaries
+CPUFrequencyMenu
