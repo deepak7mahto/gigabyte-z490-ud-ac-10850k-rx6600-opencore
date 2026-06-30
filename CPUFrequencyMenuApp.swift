@@ -9,7 +9,7 @@ struct TelemetryResults {
     var cores: [Double]
 }
 
-class MenuApp: NSObject, NSApplicationDelegate {
+class MenuApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var statusBarItem: NSStatusItem!
     var timer: Timer!
     var coreMenuItems: [NSMenuItem] = []
@@ -19,6 +19,7 @@ class MenuApp: NSObject, NSApplicationDelegate {
     var powerMenuItem: NSMenuItem!
     var thermalMenuItem: NSMenuItem!
     var sleepMenuItem: NSMenuItem!
+    var modeMenuItem: NSMenuItem!
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Create status bar item
@@ -30,6 +31,7 @@ class MenuApp: NSObject, NSApplicationDelegate {
         
         // Base menu structure
         menu = NSMenu()
+        menu.delegate = self
         menu.autoenablesItems = false
         
         let titleItem = NSMenuItem(title: "CPU Monitor", action: nil, keyEquivalent: "")
@@ -49,6 +51,33 @@ class MenuApp: NSObject, NSApplicationDelegate {
         sleepMenuItem = NSMenuItem(title: "Core Sleep Avg: ---", action: nil, keyEquivalent: "")
         sleepMenuItem.isEnabled = true
         menu.addItem(sleepMenuItem)
+        
+        // Power Mode Submenu
+        let powerSubmenu = NSMenu(title: "Power Mode")
+        powerSubmenu.autoenablesItems = false
+        
+        let perfItem = NSMenuItem(title: "Performance", action: #selector(changePowerMode(_:)), keyEquivalent: "")
+        perfItem.target = self
+        perfItem.tag = 1
+        perfItem.isEnabled = true
+        powerSubmenu.addItem(perfItem)
+        
+        let balItem = NSMenuItem(title: "Balanced", action: #selector(changePowerMode(_:)), keyEquivalent: "")
+        balItem.target = self
+        balItem.tag = 2
+        balItem.isEnabled = true
+        powerSubmenu.addItem(balItem)
+        
+        let saverItem = NSMenuItem(title: "Power Saver", action: #selector(changePowerMode(_:)), keyEquivalent: "")
+        saverItem.target = self
+        saverItem.tag = 3
+        saverItem.isEnabled = true
+        powerSubmenu.addItem(saverItem)
+        
+        modeMenuItem = NSMenuItem(title: "Power Mode", action: nil, keyEquivalent: "")
+        modeMenuItem.isEnabled = true
+        menu.setSubmenu(powerSubmenu, for: modeMenuItem)
+        menu.addItem(modeMenuItem)
         
         menu.addItem(NSMenuItem.separator())
         
@@ -73,6 +102,12 @@ class MenuApp: NSObject, NSApplicationDelegate {
         
         // Run update immediately
         updateFrequency()
+        updateActiveEPPCheckmark()
+    }
+    
+    // NSMenuDelegate trigger: update checkmarks when menu opens
+    func menuWillOpen(_ menu: NSMenu) {
+        updateActiveEPPCheckmark()
     }
     
     @objc func updateFrequency() {
@@ -136,8 +171,8 @@ class MenuApp: NSObject, NSApplicationDelegate {
     }
     
     func initializeCoreMenu(count: Int) {
-        // Insert core menu items right after the "Core Frequencies:" header (index 6)
-        let insertIndex = 7
+        // Insert core menu items right after the "Core Frequencies:" header (index 7)
+        let insertIndex = 8
         for i in 0..<count {
             let item = NSMenuItem(title: "  Core \(i): --- MHz", action: nil, keyEquivalent: "")
             item.isEnabled = true
@@ -145,6 +180,77 @@ class MenuApp: NSObject, NSApplicationDelegate {
             coreMenuItems.append(item)
         }
         didInitializeCores = true
+    }
+    
+    @objc func changePowerMode(_ sender: NSMenuItem) {
+        let choice = String(sender.tag)
+        let modeName = sender.title
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
+            task.arguments = ["/Users/homemac/Work/gigabyte-z490-ud-ac-10850k-rx6600-opencore/change_profile.py", choice]
+            
+            do {
+                try task.run()
+                task.waitUntilExit()
+                
+                if task.terminationStatus == 0 {
+                    DispatchQueue.main.async {
+                        self.updateActiveEPPCheckmark()
+                        self.sendNotification(
+                            title: "CPU Power Profile Changed",
+                            text: "Switched to \(modeName) Mode. Please restart to apply."
+                        )
+                    }
+                } else {
+                    print("Error changing profile: exited with status \(task.terminationStatus)")
+                }
+            } catch {
+                print("Failed to run profile changer: \(error)")
+            }
+        }
+    }
+    
+    func updateActiveEPPCheckmark() {
+        let epp = getActiveEPP()
+        let activeTag: Int
+        if epp == 0x00 {
+            activeTag = 1
+        } else if epp == 0xC0 {
+            activeTag = 3
+        } else {
+            activeTag = 2 // Balanced is default
+        }
+        
+        if let submenu = modeMenuItem.submenu {
+            for item in submenu.items {
+                if item.tag == activeTag {
+                    item.state = .on
+                } else {
+                    item.state = .off
+                }
+            }
+        }
+    }
+    
+    func getActiveEPP() -> Int {
+        let repoPath = "/Users/homemac/Work/gigabyte-z490-ud-ac-10850k-rx6600-opencore/EFI/OC/Kexts/CPUFriendDataProvider.kext/Contents/Info.plist"
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: repoPath)) else { return 0x80 }
+        guard let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else { return 0x80 }
+        guard let personalities = plist["IOKitPersonalities"] as? [String: Any] else { return 0x80 }
+        for (_, value) in personalities {
+            if let dict = value as? [String: Any], let freqData = dict["cf-frequency-data"] as? Data {
+                let eppMarker = Data([0x65, 0x70, 0x70, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+                if let range = freqData.range(of: eppMarker) {
+                    let valOffset = range.lowerBound + 20 + 8
+                    if valOffset < freqData.count {
+                        return Int(freqData[valOffset])
+                    }
+                }
+            }
+        }
+        return 0x80
     }
     
     func parseAllTelemetry(_ output: String) -> TelemetryResults {
@@ -266,6 +372,14 @@ class MenuApp: NSObject, NSApplicationDelegate {
         }
         
         return TelemetryResults(system: systemFreq, power: powerStr, thermal: thermalStr, sleep: sleepStr, cores: coreFrequencies)
+    }
+    
+    func sendNotification(title: String, text: String) {
+        let notification = NSUserNotification()
+        notification.title = title
+        notification.informativeText = text
+        notification.soundName = NSUserNotificationDefaultSoundName
+        NSUserNotificationCenter.default.deliver(notification)
     }
     
     @objc func quit() {
