@@ -18,17 +18,27 @@ class MenuApp: NSObject, NSApplicationDelegate {
         
         // Base menu structure
         menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "CPU Frequency Monitor", action: nil, keyEquivalent: ""))
+        // Prevent macOS from auto-disabling items that don't have an action
+        menu.autoenablesItems = false
+        
+        let titleItem = NSMenuItem(title: "CPU Frequency Monitor", action: nil, keyEquivalent: "")
+        titleItem.isEnabled = false // Keep the header looking like a header
+        menu.addItem(titleItem)
         menu.addItem(NSMenuItem.separator())
         
         // Core items will be dynamically inserted here later
         
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
+        let quitItem = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
+        quitItem.target = self
+        quitItem.isEnabled = true
+        menu.addItem(quitItem)
         statusBarItem.menu = menu
         
-        // Timer to update frequency every 2 seconds
-        timer = Timer.scheduledTimer(timeInterval: 2.0, target: self, selector: #selector(updateFrequency), userInfo: nil, repeats: true)
+        // Timer to update frequency every 2.0 seconds
+        // Add to .common run loop mode so it keeps running while the menu is open (tracking mode)
+        timer = Timer(timeInterval: 2.0, target: self, selector: #selector(updateFrequency), userInfo: nil, repeats: true)
+        RunLoop.main.add(timer, forMode: .common)
         
         // Run update immediately
         updateFrequency()
@@ -72,7 +82,7 @@ class MenuApp: NSObject, NSApplicationDelegate {
                                 } else {
                                     freqStr = String(format: "%.0f MHz", freqVal)
                                 }
-                                self.coreMenuItems[i].title = "  Core \(i): \(freqStr)"
+                                self.coreMenuItems[i].title = "Core \(i): \(freqStr)"
                             }
                         }
                     }
@@ -87,7 +97,8 @@ class MenuApp: NSObject, NSApplicationDelegate {
         // Insert core menu items before the second-to-last item (the quit separator and quit button)
         let insertIndex = 2
         for i in 0..<count {
-            let item = NSMenuItem(title: "  Core \(i): --- MHz", action: nil, keyEquivalent: "")
+            let item = NSMenuItem(title: "Core \(i): --- MHz", action: nil, keyEquivalent: "")
+            item.isEnabled = true // Explicitly enable so it doesn't look greyed out
             menu.insertItem(item, at: insertIndex + i)
             coreMenuItems.append(item)
         }
